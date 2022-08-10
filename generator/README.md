@@ -3,9 +3,10 @@
 Сервис генерации потока цен сделок валютных пар на основании заданного тренда
 
 Возможные паттерны генерации:
-* `FROM_TIME`
-* 
+* `TIME` - использовать текущее время
+* `SEED` - использовать значение `PRICE_GENERATOR_SEED`
 
 
 TODO:
 - [x] Convert Cache interface to generic
+- [ ] Make SimpleCache thread-safe
