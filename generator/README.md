@@ -4,9 +4,9 @@
 
 Возможные паттерны генерации:
 * `TIME` - использовать текущее время
-* `SEED` - использовать значение `PRICE_GENERATOR_SEED`
+* `SEED` - использовать значение `RATE_GENERATOR_SEED`
 
 
 TODO:
 - [x] Convert Cache interface to generic
-- [ ] Make SimpleCache thread-safe
+- [x] Make SimpleCache thread-safe

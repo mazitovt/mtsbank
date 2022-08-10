@@ -12,14 +12,16 @@ type PriceGenerator interface {
 	Generate()
 }
 
+type GeneratorFunc func(string) int64
+
 type ExchangeRateAt struct {
-	time         time.Time
-	exchangeRate int64
+	Time         time.Time
+	ExchangeRate int64
 }
 
 type SimplePriceGenerator struct {
 	cache map[string]cache.Cache[ExchangeRateAt]
-	f     func(string) int64
+	f     GeneratorFunc
 }
 
 func (s *SimplePriceGenerator) Get(currencyPair string) ([]ExchangeRateAt, error) {
@@ -35,13 +37,13 @@ func (s *SimplePriceGenerator) Generate() {
 	for k, v := range s.cache {
 		rate := s.f(k)
 		v.Add(ExchangeRateAt{
-			time:         t,
-			exchangeRate: rate,
+			Time:         t,
+			ExchangeRate: rate,
 		})
 	}
 }
 
-func NewSimplePriceGenerator(currencyPairs []string, f func(string) int64, cacheSize uint64) *SimplePriceGenerator {
+func NewSimplePriceGenerator(currencyPairs []string, f GeneratorFunc, cacheSize uint64) *SimplePriceGenerator {
 
 	m := map[string]cache.Cache[ExchangeRateAt]{}
 	for _, p := range currencyPairs {
@@ -51,7 +53,7 @@ func NewSimplePriceGenerator(currencyPairs []string, f func(string) int64, cache
 	return &SimplePriceGenerator{cache: m, f: f}
 }
 
-func NewExchangeRateFromSeed(seed int64) func(string) int64 {
+func NewExchangeRateFromSeed(seed int64) GeneratorFunc {
 	r := rand.New(rand.NewSource(seed))
 	return func(currencyPair string) int64 {
 		b := []byte(currencyPair)
