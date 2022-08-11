@@ -2,8 +2,7 @@
 
 Сервис истории цен сделок валютных пар
 
-- [ ] Mercury
-- [x] Venus
-- [x] Earth (Orbit/Moon)
-- [x] Mars
-- [ ] Jupiter
+TODO:
+- [x] Make db inaccessible by other services
+- [ ] Logging to stdout
+- [ ] Logging to file

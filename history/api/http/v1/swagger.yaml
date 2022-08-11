@@ -1,0 +1,34 @@
+openapi: 3.0.3
+info:
+  title: Title
+  description: Title
+  version: 1.0.0
+components:
+  schemas:
+    ExchangeRate:
+      type: object
+      properties:
+        time:
+          type: string
+          format: date-time
+        rate:
+          type: integer
+paths:
+  "/rates/{id}":
+    put:
+      summary: Create an order
+      parameters:
+        - in: path
+          description: Order ID
+          name: id
+          schema:
+            format: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Order"
+      responses:
+        "201":
+          description: The order was successfully created.
