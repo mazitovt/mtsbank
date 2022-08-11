@@ -27,7 +27,7 @@ type SimplePriceGenerator struct {
 func (s *SimplePriceGenerator) Get(currencyPair string) ([]ExchangeRateAt, error) {
 	v, ok := s.cache[currencyPair]
 	if !ok {
-		return []ExchangeRateAt{}, fmt.Errorf("no such currency pair: %s", currencyPair)
+		return nil, fmt.Errorf("no such currency pair: %s", currencyPair)
 	}
 	return v.Values(), nil
 }
