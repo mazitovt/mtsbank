@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"generator/app"
 	"generator/app/config"
+	"generator/app/logger"
 	"log"
 	"net/http"
 	"os"
@@ -22,7 +23,7 @@ func main() {
 	f, err := config.GetGeneratorFunc(cfg)
 	checkErr(err)
 
-	g := app.NewSimplePriceGenerator(cfg.CurrencyPairs, f, uint64(cfg.CacheSize))
+	g := app.NewSimplePriceGenerator(cfg.CurrencyPairs, f, uint64(cfg.CacheSize), logger.New(logger.Debug))
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -81,12 +82,12 @@ func startGenerate(ctx context.Context, g app.PriceGenerator, period time.Durati
 func newHandler(g app.PriceGenerator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
-		if !r.URL.Query().Has("pair") {
-			w.Write([]byte("parameter 'pair' is missing"))
+		if !r.URL.Query().Has("currency_pair") {
+			w.Write([]byte("parameter 'currency_pair' is missing"))
 			return
 		}
 
-		pair := r.URL.Query().Get("pair")
+		pair := r.URL.Query().Get("currency_pair")
 
 		get, err := g.Get(pair)
 		if err != nil {

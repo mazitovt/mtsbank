@@ -3,6 +3,7 @@ package app
 import (
 	"fmt"
 	"generator/app/cache"
+	"generator/app/logger"
 	"math/rand"
 	"time"
 )
@@ -15,13 +16,24 @@ type PriceGenerator interface {
 type GeneratorFunc func(string) int64
 
 type ExchangeRateAt struct {
-	Time         time.Time
-	ExchangeRate int64
+	Time         time.Time `json:"time"`
+	ExchangeRate int64     `json:"exchangeRate"`
 }
 
 type SimplePriceGenerator struct {
-	cache map[string]cache.Cache[ExchangeRateAt]
-	f     GeneratorFunc
+	cache  map[string]cache.Cache[ExchangeRateAt]
+	f      GeneratorFunc
+	logger logger.Logger
+}
+
+func NewSimplePriceGenerator(currencyPairs []string, f GeneratorFunc, cacheSize uint64, logger logger.Logger) *SimplePriceGenerator {
+
+	m := map[string]cache.Cache[ExchangeRateAt]{}
+	for _, p := range currencyPairs {
+		m[p] = cache.NewLimitedCache[ExchangeRateAt](cacheSize)
+	}
+
+	return &SimplePriceGenerator{cache: m, f: f, logger: logger}
 }
 
 func (s *SimplePriceGenerator) Get(currencyPair string) ([]ExchangeRateAt, error) {
@@ -36,21 +48,13 @@ func (s *SimplePriceGenerator) Generate() {
 	t := time.Now()
 	for k, v := range s.cache {
 		rate := s.f(k)
-		v.Add(ExchangeRateAt{
+		exRate := ExchangeRateAt{
 			Time:         t,
 			ExchangeRate: rate,
-		})
+		}
+		s.logger.Debug("currency=%v, rate=%v", k, exRate)
+		v.Add(exRate)
 	}
-}
-
-func NewSimplePriceGenerator(currencyPairs []string, f GeneratorFunc, cacheSize uint64) *SimplePriceGenerator {
-
-	m := map[string]cache.Cache[ExchangeRateAt]{}
-	for _, p := range currencyPairs {
-		m[p] = cache.NewLimitedCache[ExchangeRateAt](cacheSize)
-	}
-
-	return &SimplePriceGenerator{cache: m, f: f}
 }
 
 func NewExchangeRateFromSeed(seed int64) GeneratorFunc {
