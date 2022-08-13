@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
+	middleware "github.com/deepmap/oapi-codegen/pkg/chi-middleware"
+	"github.com/go-chi/chi/v5"
 	"log"
 	"mtsbank/history"
+	v1 "mtsbank/history/internal/api/http/v1"
 	"mtsbank/history/internal/client/generator_service"
 	"mtsbank/history/internal/config"
 	"mtsbank/history/internal/repo"
@@ -13,25 +15,35 @@ import (
 	"net"
 	"net/http"
 	"os"
-	"os/signal"
-	"syscall"
 	"time"
 )
 
 func main() {
+
+	swagger, err := v1.GetSwagger()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading swagger spec\n: %s", err)
+		os.Exit(1)
+	}
+
+	// Clear out the servers array in the swagger spec, that skips validating
+	// that server names match. We don't know how this thing will be run.
+	swagger.Servers = nil
+
+	// Create an instance of our handler which satisfies the generated interface
 	cfg, err := config.Init()
 	checkErr(err)
 
 	l := logger.New(logger.Debug)
 
-	repo, err := repo.NewRepoPG(&cfg.Postgres, l)
+	repoPG, err := repo.NewRepoPG(&cfg.Postgres, l)
 	if err != nil {
 		log.Fatal("NewRepo ", err)
 	}
 
 	if cfg.Migrate {
 		l.Debug("start migration")
-		if err = repo.Migrate(); err != nil {
+		if err = repoPG.Migrate(); err != nil {
 			log.Fatal(err)
 		}
 		l.Debug("end migration")
@@ -39,48 +51,35 @@ func main() {
 
 	generatorClient := generator_service.NewService(net.JoinHostPort(cfg.Generator.Host, cfg.Generator.Port), l)
 
-	g := history.NewSimpleHistoryService(repo, generatorClient, l)
+	g := history.NewSimpleHistoryService(repoPG, generatorClient, l)
 
-	ctx, cancel := context.WithCancel(context.Background())
+	// This is how you set up a basic chi router
+	r := chi.NewRouter()
 
-	// gracefully shutdown when signal comes
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigs
-		fmt.Println("cancel signal")
-		cancel()
-	}()
+	// Use our validation middleware to check all requests against the
+	// OpenAPI schema.
+	r.Use(middleware.OapiRequestValidator(swagger))
 
-	// periodically call Collect
-	go startCollecting(ctx, g, cfg.Period, l)
+	// We now register our petStore above as the handler for the interface
+	v1.HandlerFromMux(g, r)
 
-	// wait for incoming requests
-	http.HandleFunc("/rates", newHandler(g))
-	s := http.Server{
+	s := &http.Server{
+		Handler: r,
 		Addr:    net.JoinHostPort(cfg.Host, cfg.Port),
-		Handler: http.DefaultServeMux,
 	}
 
-	go func() {
-		<-ctx.Done()
-		fmt.Println("server shutdown")
-		if err := s.Shutdown(context.Background()); err != nil {
-			log.Printf("HTTP server Shutdown: %v", err)
-		}
-	}()
-
-	err = s.ListenAndServe()
-	time.Sleep(cfg.Period)
-	log.Fatal(err)
+	// periodically call Collect
+	go startCollecting(context.Background(), g, cfg.Period, l)
+	// And we serve HTTP until the world ends.
+	log.Fatal(s.ListenAndServe())
 }
-
 func checkErr(err error) {
 	if err != nil {
 		log.Fatal(err)
 	}
 }
 
+// TODO: encapsulate to HistoryService
 func startCollecting(ctx context.Context, h history.HistoryService, period time.Duration, l logger.Logger) {
 	for {
 		select {
@@ -98,56 +97,3 @@ func startCollecting(ctx context.Context, h history.HistoryService, period time.
 		}
 	}
 }
-
-func newHandler(h history.HistoryService) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if !r.URL.Query().Has("currency_pair") {
-			w.Write([]byte("parameter 'currency_pair' is missing"))
-			return
-		}
-
-		if !r.URL.Query().Has("from") {
-			w.Write([]byte("parameter 'from' is missing"))
-			return
-		}
-
-		if !r.URL.Query().Has("to") {
-			w.Write([]byte("parameter 'to' is missing"))
-			return
-		}
-
-		pair := r.URL.Query().Get("currency_pair")
-		fromParam := r.URL.Query().Get("from")
-		toParam := r.URL.Query().Get("to")
-
-		from, err := time.Parse(time.RFC3339, fromParam)
-		if err != nil {
-			w.Write([]byte(err.Error()))
-			return
-		}
-
-		to, err := time.Parse(time.RFC3339, toParam)
-		if err != nil {
-			w.Write([]byte(err.Error()))
-			return
-		}
-
-		get, err := h.GetByTime(r.Context(), pair, from, to)
-		if err != nil {
-			w.Write([]byte(err.Error()))
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		err = json.NewEncoder(w).Encode(get)
-		if err != nil {
-			w.Write([]byte(err.Error()))
-			return
-		}
-	}
-}
-
-//if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-//// Error starting or closing listener:
-//log.Fatalf("HTTP server ListenAndServe: %v", err)
-//}
