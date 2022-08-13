@@ -45,7 +45,7 @@ func (s *SimplePriceGenerator) Get(currencyPair string) ([]ExchangeRateAt, error
 }
 
 func (s *SimplePriceGenerator) Generate() {
-	t := time.Now()
+	t := time.Now().Round(time.Microsecond)
 	for k, v := range s.cache {
 		rate := s.f(k)
 		exRate := ExchangeRateAt{
