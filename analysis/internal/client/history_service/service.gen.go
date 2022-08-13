@@ -116,23 +116,8 @@ func WithRequestEditorFn(fn RequestEditorFn) ClientOption {
 
 // The interface specification for the client above.
 type ClientInterface interface {
-	// GetPing request
-	GetPing(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error)
-
 	// GetRatesCurrencyPair request
 	GetRatesCurrencyPair(ctx context.Context, currencyPair string, params *GetRatesCurrencyPairParams, reqEditors ...RequestEditorFn) (*http.Response, error)
-}
-
-func (c *Client) GetPing(ctx context.Context, reqEditors ...RequestEditorFn) (*http.Response, error) {
-	req, err := NewGetPingRequest(c.Server)
-	if err != nil {
-		return nil, err
-	}
-	req = req.WithContext(ctx)
-	if err := c.applyEditors(ctx, req, reqEditors); err != nil {
-		return nil, err
-	}
-	return c.Client.Do(req)
 }
 
 func (c *Client) GetRatesCurrencyPair(ctx context.Context, currencyPair string, params *GetRatesCurrencyPairParams, reqEditors ...RequestEditorFn) (*http.Response, error) {
@@ -145,33 +130,6 @@ func (c *Client) GetRatesCurrencyPair(ctx context.Context, currencyPair string, 
 		return nil, err
 	}
 	return c.Client.Do(req)
-}
-
-// NewGetPingRequest generates requests for GetPing
-func NewGetPingRequest(server string) (*http.Request, error) {
-	var err error
-
-	serverURL, err := url.Parse(server)
-	if err != nil {
-		return nil, err
-	}
-
-	operationPath := fmt.Sprintf("/ping")
-	if operationPath[0] == '/' {
-		operationPath = "." + operationPath
-	}
-
-	queryURL, err := serverURL.Parse(operationPath)
-	if err != nil {
-		return nil, err
-	}
-
-	req, err := http.NewRequest("GET", queryURL.String(), nil)
-	if err != nil {
-		return nil, err
-	}
-
-	return req, nil
 }
 
 // NewGetRatesCurrencyPairRequest generates requests for GetRatesCurrencyPair
@@ -287,33 +245,8 @@ func WithBaseURL(baseURL string) ClientOption {
 
 // ClientWithResponsesInterface is the interface specification for the client with responses above.
 type ClientWithResponsesInterface interface {
-	// GetPing request
-	GetPingWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetPingResponse, error)
-
 	// GetRatesCurrencyPair request
 	GetRatesCurrencyPairWithResponse(ctx context.Context, currencyPair string, params *GetRatesCurrencyPairParams, reqEditors ...RequestEditorFn) (*GetRatesCurrencyPairResponse, error)
-}
-
-type GetPingResponse struct {
-	Body         []byte
-	HTTPResponse *http.Response
-	JSON200      *string
-}
-
-// Status returns HTTPResponse.Status
-func (r GetPingResponse) Status() string {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.Status
-	}
-	return http.StatusText(0)
-}
-
-// StatusCode returns HTTPResponse.StatusCode
-func (r GetPingResponse) StatusCode() int {
-	if r.HTTPResponse != nil {
-		return r.HTTPResponse.StatusCode
-	}
-	return 0
 }
 
 type GetRatesCurrencyPairResponse struct {
@@ -339,15 +272,6 @@ func (r GetRatesCurrencyPairResponse) StatusCode() int {
 	return 0
 }
 
-// GetPingWithResponse request returning *GetPingResponse
-func (c *ClientWithResponses) GetPingWithResponse(ctx context.Context, reqEditors ...RequestEditorFn) (*GetPingResponse, error) {
-	rsp, err := c.GetPing(ctx, reqEditors...)
-	if err != nil {
-		return nil, err
-	}
-	return ParseGetPingResponse(rsp)
-}
-
 // GetRatesCurrencyPairWithResponse request returning *GetRatesCurrencyPairResponse
 func (c *ClientWithResponses) GetRatesCurrencyPairWithResponse(ctx context.Context, currencyPair string, params *GetRatesCurrencyPairParams, reqEditors ...RequestEditorFn) (*GetRatesCurrencyPairResponse, error) {
 	rsp, err := c.GetRatesCurrencyPair(ctx, currencyPair, params, reqEditors...)
@@ -355,32 +279,6 @@ func (c *ClientWithResponses) GetRatesCurrencyPairWithResponse(ctx context.Conte
 		return nil, err
 	}
 	return ParseGetRatesCurrencyPairResponse(rsp)
-}
-
-// ParseGetPingResponse parses an HTTP response from a GetPingWithResponse call
-func ParseGetPingResponse(rsp *http.Response) (*GetPingResponse, error) {
-	bodyBytes, err := ioutil.ReadAll(rsp.Body)
-	defer func() { _ = rsp.Body.Close() }()
-	if err != nil {
-		return nil, err
-	}
-
-	response := &GetPingResponse{
-		Body:         bodyBytes,
-		HTTPResponse: rsp,
-	}
-
-	switch {
-	case strings.Contains(rsp.Header.Get("Content-Type"), "json") && rsp.StatusCode == 200:
-		var dest string
-		if err := json.Unmarshal(bodyBytes, &dest); err != nil {
-			return nil, err
-		}
-		response.JSON200 = &dest
-
-	}
-
-	return response, nil
 }
 
 // ParseGetRatesCurrencyPairResponse parses an HTTP response from a GetRatesCurrencyPairWithResponse call
@@ -418,9 +316,6 @@ func ParseGetRatesCurrencyPairResponse(rsp *http.Response) (*GetRatesCurrencyPai
 
 // ServerInterface represents all server handlers.
 type ServerInterface interface {
-
-	// (GET /ping)
-	GetPing(w http.ResponseWriter, r *http.Request)
 	// Get rates for currency from start to end
 	// (GET /rates/{currency_pair})
 	GetRatesCurrencyPair(w http.ResponseWriter, r *http.Request, currencyPair string, params GetRatesCurrencyPairParams)
@@ -434,21 +329,6 @@ type ServerInterfaceWrapper struct {
 }
 
 type MiddlewareFunc func(http.HandlerFunc) http.HandlerFunc
-
-// GetPing operation middleware
-func (siw *ServerInterfaceWrapper) GetPing(w http.ResponseWriter, r *http.Request) {
-	ctx := r.Context()
-
-	var handler = func(w http.ResponseWriter, r *http.Request) {
-		siw.Handler.GetPing(w, r)
-	}
-
-	for _, middleware := range siw.HandlerMiddlewares {
-		handler = middleware(handler)
-	}
-
-	handler(w, r.WithContext(ctx))
-}
 
 // GetRatesCurrencyPair operation middleware
 func (siw *ServerInterfaceWrapper) GetRatesCurrencyPair(w http.ResponseWriter, r *http.Request) {
@@ -615,9 +495,6 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 	}
 
 	r.Group(func(r chi.Router) {
-		r.Get(options.BaseURL+"/ping", wrapper.GetPing)
-	})
-	r.Group(func(r chi.Router) {
 		r.Get(options.BaseURL+"/rates/{currency_pair}", wrapper.GetRatesCurrencyPair)
 	})
 
@@ -627,15 +504,15 @@ func HandlerWithOptions(si ServerInterface, options ChiServerOptions) http.Handl
 // Base64 encoded, gzipped, json marshaled Swagger object
 var swaggerSpec = []string{
 
-	"H4sIAAAAAAAC/6xUyW7cMAz9FYHtUY2nSdGDr0EQFC3QoMspCApFpj0KRksoushg4H8vKHsym7uhPUmi",
-	"SL5H8kkbsNGnGDBwhnoD2S7Rm7K9Iookm0QxIbHDYraxQVnbSN4w1OACX5yDBl4nHI/YIcGgwWPOpive",
-	"02VmcqGDYdBA+Ng7wgbq2zHnzv/uOVm8f0DLkuvqyS5N6PCTYTwlRZN1n9TbN7Ok2PlD18YwvipW/Rua",
-	"k1MBO+Uo3i60UZI3mC25xC4GqOGL41XJXtbd+TtSHj1eny3OFsIuJgwmOajhopg0JMPLUmOVhFO9gQ5Z",
-	"FqnfCMK7Bmq4Rr6Re2GcUwx5bMz5YjEOLTCGEmZSWjlbAquHLOjbqc/NadBHtXx8L9ZBQyVtyNXG9kQY",
-	"7PpbMo6GPX6HcdfIqkSoNpLaBikJUi4oktmqlqJXmQ2x4qgwNKBPyxQF5MspwY1xVJpExiMjZahvj6E/",
-	"S0IXOpWiCwwyJajhsUdag4ZgRA8g0KD3OvFn+jjG+poSkrqPfeE+B8TxP8Bc7vdvCyRK2eEczOUA8jj7",
-	"3T9qxjH6EviSsIUaXlS7P6WaPpTq4P0OzyUaIrOe09kHl1nFdtQMlOvW9Cv+K2a/JFS+txnkPuBTQsvY",
-	"KJx8NOTee0Prnwv5VLryTH4EAAD//4St8htfBQAA",
+	"H4sIAAAAAAAC/6xUS2/bTAz8Kwt+31GN3KToQdcgKAr0UPRxCoKCWVHyBt5HuFQRw9B/L7hSYst2X0BP",
+	"krjkzCw51A5s9CkGCpKh2UG2a/JYXm+YI+tL4piIxVEJ29iSPrvIHgUacEGuLqEC2SaaPqknhrECTzlj",
+	"X7LnwyzsQg/jWAHT4+CYWmhuJ8x9/t0LWLx/ICuKdfNk1xh6+oRCp6J4jh6KevvmrChxfpnaotCrEq1+",
+	"I3NOKmSnGjXbhS4qeEvZskviYoAGvjjZFPTy3H9/J85TxuuL1cVK1cVEAZODBq5KqIKEsi53rJU31zs7",
+	"MFOw228JHY960pOckr4jMaXCdJHNc5HRIuOCYW2m6Th6kwVZjERDoYUigVFB3rcTjLY8X88AH9FxUcXo",
+	"SYgzNLfH1J8V0IXepOiCgLYFGngciLdQQUAdACg1VLPh/nwgx1xfUyI293Eo2s8RSfwHNNeH/Xsm0tHs",
+	"eRZzWVAeo9+prXKKIU/uvVytps0KQqGMElPaOFumUD9kVbA7wHNCvhT+z9RBA//V+yWu5w2uFwszvlwR",
+	"mXE7mXV5ww8ui4nd5Bkoxx0OG/krZb8UVP4nZ5iHQE+JrFBraM6pIA/eI29/buRT647jOP4IAAD//4Qp",
+	"7eLQBAAA",
 }
 
 // GetSwagger returns the content of the embedded swagger specification file

@@ -7,8 +7,8 @@ type CalculatorOHLC struct {
 	empty bool
 }
 
-func NewCalculatorOHLC() CalculatorOHLC {
-	return CalculatorOHLC{ohlc: repo.OHLC{}, empty: true}
+func NewCalculatorOHLC(currencyPair string, timeFrame string) CalculatorOHLC {
+	return CalculatorOHLC{ohlc: repo.OHLC{CurrencyPair: currencyPair, TimeFrame: timeFrame}, empty: true}
 }
 
 func (c *CalculatorOHLC) Update(r ExchangeRate) {

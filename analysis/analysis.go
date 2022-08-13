@@ -30,168 +30,139 @@ type Analyzer interface {
 	CollectHistory(ctx context.Context, h hs.HistoryService) error
 }
 
-type rateFilter struct {
-	last time.Time
-}
-
-// Check takes ORDERED rates and return index, from which starts unseen data
-func (t *rateFilter) Check(rates []ExchangeRate) int64 {
-	for i, r := range rates {
-		if r.Time.After(t.last) {
-			t.last = rates[len(rates)-1].Time
-			return int64(i)
-		}
-	}
-	return int64(len(rates))
-}
-
-func (t *rateFilter) Last() time.Time {
-	return t.last
-}
-
 type service struct {
-	rateFilter rateFilter
-
-	currencyPairs []string
-	timeFrames    []time.Duration
-
-	//TODO: when to close channels?
-	currencyPairToTimeFrameChannels map[string][]TimeFrameChannel
-	generator                       gs.GeneratorService
-	logger                          logger.Logger
-	repo                            repo.Repo
+	pollPeriod            time.Duration
+	currencyPairAnalyzers map[string]*CurrencyPairAnalyzer
+	ohlcChannel           <-chan repo.OHLC
+	generator             gs.GeneratorService
+	logger                logger.Logger
+	repo                  repo.Repo
 }
 
-type TimeFrameChannel struct {
-	timeFrame time.Duration
-	ch        chan ExchangeRate
-}
+func NewService(pollPeriod time.Duration, currencyPairs []string, timeFrames []time.Duration, generator gs.GeneratorService, logger logger.Logger, r repo.Repo) *service {
 
-func NewService(currencyPairs []string, timeFrames []time.Duration, generator gs.GeneratorService, logger logger.Logger, repo repo.Repo) *service {
+	ohlcChannel := make(chan repo.OHLC, 1)
 
-	m := map[string][]TimeFrameChannel{}
+	m := map[string]*CurrencyPairAnalyzer{}
 	for _, currencyPair := range currencyPairs {
-		timeFramesChannels := make([]TimeFrameChannel, len(timeFrames))
-		for i, timeFrame := range timeFrames {
-			timeFramesChannels[i] = TimeFrameChannel{
-				timeFrame: timeFrame,
-				ch:        make(chan ExchangeRate, 1),
-			}
-		}
-		m[currencyPair] = timeFramesChannels
+		m[currencyPair] = NewCurrencyPairAnalyzer(currencyPair, timeFrames, ohlcChannel, logger)
 	}
 
 	return &service{
-		rateFilter:                      rateFilter{},
-		currencyPairs:                   currencyPairs,
-		timeFrames:                      timeFrames,
-		currencyPairToTimeFrameChannels: m,
-		generator:                       generator,
-		logger:                          logger,
-		repo:                            repo,
+		pollPeriod:            pollPeriod,
+		currencyPairAnalyzers: m,
+		ohlcChannel:           ohlcChannel,
+		generator:             generator,
+		logger:                logger,
+		repo:                  r,
 	}
 }
 
-// StartTimeFrameGoroutines starts service with reset period. BLOCKING
-func (s *service) StartTimeFrameGoroutines(ctx context.Context, resetPeriod time.Duration) {
+func (s *service) Start(
+	ctx context.Context,
+	h hs.HistoryService,
+	resetPeriod time.Duration) {
 
-	resetCtx, cancel := context.WithTimeout(ctx, resetPeriod)
-	defer cancel()
+	//call history
+	go func() {
+		err := s.CollectHistory(ctx, h)
+		if err != nil {
+			s.logger.Error("service.Start: CollectHistory returned err: %v", err)
+		}
+	}()
 
 	for {
 		select {
 		case <-ctx.Done():
-			s.logger.Info("Context is done: %v", ctx.Err())
+			s.logger.Info("service.Start:  context is done; %v", ctx.Err())
 			return
 		default:
+			s.logger.Debug("")
+			s.logger.Debug("service.Start: new cycle")
+			resetCtx, cancel := context.WithTimeout(ctx, resetPeriod)
+
 			wg := sync.WaitGroup{}
+			// start collecting
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				s.StartAnalyzers(resetCtx)
+			}()
 
-			goroutineCount := len(s.timeFrames) * len(s.currencyPairs)
-			wg.Add(goroutineCount)
-
-			s.logger.Info("Starting TimeFrameGoroutines")
-			for currencyPair, timeFrameChannels := range s.currencyPairToTimeFrameChannels {
-				for _, timeFrameChannel := range timeFrameChannels {
-					go func(t TimeFrameChannel) {
-						defer wg.Done()
-						s.timeFrameGoroutine(resetCtx, currencyPair, t.ch, t.timeFrame)
-					}(timeFrameChannel)
+			// start polling
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				err := s.CollectNewRates(resetCtx)
+				if err != nil {
+					s.logger.Error("service.Start: CollectNewRates returned err: %v", err)
 				}
-			}
+			}()
 
-			s.logger.Info("Waiting on TimeFrameGoroutines: start")
+			// collect OHLC and send to repo
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				s.CollectOHLC(resetCtx)
+			}()
+
 			wg.Wait()
-			s.logger.Info("Waiting on TimeFrameGoroutines: end")
-		}
+			s.logger.Info("service.Start: resetCtx is done")
+			s.repo.Reset(context.TODO())
 
-		s.logger.Info("All TimeFrameGoroutines are done")
-	}
-
-}
-
-// CollectNewRates periodically ask generator for new rates. CollectNewRates is a blocking function (run in G)
-func (s *service) CollectNewRates(ctx context.Context, period time.Duration) {
-	ticker := time.NewTicker(period)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			s.logger.Info("Context is done, err: %v", ctx.Err())
-			return
-		case <-ticker.C:
-			s.logger.Debug("Collecting new rates from Generator: start")
-			if err := s.collectRates(ctx); err != nil {
-				s.logger.Error("service.collectRates: %v", err)
-				//TODO: return or not?
-			}
-			s.logger.Info("Collecting new rates from Generator: done")
+			cancel()
 		}
 	}
+
 }
 
 // TODO: remove error or return meaningful errors (currently always returns nil)
-// TODO:
-func (s *service) collectRates(ctx context.Context) error {
-	wg := sync.WaitGroup{}
-	wg.Add(len(s.currencyPairs))
+func (s *service) CollectNewRates(ctx context.Context) error {
+	s.logger.Debug("service.CollectNewRates: start")
+	defer s.logger.Debug("service.CollectNewRates: end")
 
-	for _, currency := range s.currencyPairs {
-		go func(currency string) {
-			defer wg.Done()
-			values, err := s.generator.Values(ctx, currency)
-			if err != nil {
-				s.logger.Error("GeneratorService.Values: %v", err)
-				return
-			}
-			rates := make([]ExchangeRate, len(values))
-			for i := 0; i < len(rates); i++ {
-				rates[i] = ExchangeRate{
-					Time: values[i].Time,
-					Rate: values[i].Rate,
+	pollTicker := time.NewTicker(s.pollPeriod)
+	defer pollTicker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			s.logger.Info("service.CollectNewRates: context is done: %v", ctx.Err())
+			return nil
+		case <-pollTicker.C:
+			// TODO : add WaitGroup
+			for currencyPair, analyzer := range s.currencyPairAnalyzers {
+
+				values, err := s.generator.Values(ctx, currencyPair)
+				if err != nil {
+					s.logger.Error("GeneratorService.Values: %v", err)
+					return err
 				}
-			}
+				rates := make([]ExchangeRate, len(values))
+				for i := 0; i < len(rates); i++ {
+					rates[i] = ExchangeRate{
+						Time: values[i].Time,
+						Rate: values[i].Rate,
+					}
+				}
 
-			err = s.sendToTimeFrameGoroutines(ctx, currency, rates)
-			if err != nil {
-				s.logger.Error("service.SendToTimeFrameGoroutines: %v", err)
-				return
+				analyzer.Send(ctx, rates)
 			}
-
-		}(currency)
+		}
 	}
-
-	wg.Wait()
-
-	return nil
 }
 
 var ErrResponseParse = errors.New("HistoryService responded with unparsed body")
 
 func (s *service) CollectHistory(ctx context.Context, h hs.HistoryService) error {
+	s.logger.Debug("service.CollectHistory: start")
+	defer s.logger.Debug("service.CollectHistory: end")
+
 	dayStart := time.Now().Truncate(24 * time.Hour)
 	now := time.Now()
-	for _, currency := range s.currencyPairs {
-		resp, err := h.GetRatesCurrencyPairWithResponse(ctx, currency, &hs.GetRatesCurrencyPairParams{
+
+	for currencyPair, currencyPairAnalyzer := range s.currencyPairAnalyzers {
+		resp, err := h.GetRatesCurrencyPairWithResponse(ctx, currencyPair, &hs.GetRatesCurrencyPairParams{
 			From: &dayStart,
 			To:   &now,
 		})
@@ -214,113 +185,35 @@ func (s *service) CollectHistory(ctx context.Context, h hs.HistoryService) error
 			}
 		}
 
-		err = s.sendToTimeFrameGoroutines(ctx, currency, rates)
-		if err != nil {
-			s.logger.Debug("service.SendToTimeFrameGoroutines: %v", err)
-			return err
-		}
+		currencyPairAnalyzer.Send(ctx, rates)
 	}
 
 	return nil
 }
 
-// timeFrameGoroutine is a blocking function.
-//
-// Data channel requirements:
-//	- ExchangeRate.Time is newer than previously sent value
-// 	- ExchangeRate was not sent before
-func (s *service) timeFrameGoroutine(ctx context.Context, currencyPair string, data <-chan ExchangeRate, period time.Duration) {
-
-	calculatorOHLC := NewCalculatorOHLC()
-
-	ticker := time.NewTicker(period)
-	defer ticker.Stop()
+func (s *service) CollectOHLC(ctx context.Context) {
+	s.logger.Debug("service.CollectOHLC: start")
+	defer s.logger.Debug("service.CollectOHLC: end")
 
 	for {
-
-		// Additional select to prioritize context and ticker
 		select {
 		case <-ctx.Done():
-			s.logger.Info("Context is done, err: %v", ctx.Err())
+			s.logger.Info("service.CollectOHLC: context is done: %v", ctx.Err())
 			return
-		case <-ticker.C:
-			s.logger.Info("Collect OHLC for %v", period)
-			if calculatorOHLC.IsEmpty() {
-				s.logger.Info("TimeFrame [%v]: no values were generated", period)
-				continue
-			}
-			if err := s.repo.Put(ctx, currencyPair, period.String(), calculatorOHLC.OHLC()); err != nil {
-				s.logger.Error("Repo.Put: %v", err)
-				//TODO: return or not?
-			}
-			calculatorOHLC.Reset()
-		default:
-		}
-
-		select {
-		case <-ctx.Done():
-			s.logger.Info("Context is done, err: %v", ctx.Err())
-			return
-		case <-ticker.C:
-			s.logger.Info("Collect OHLC for %v", period)
-			if calculatorOHLC.IsEmpty() {
-				s.logger.Info("TimeFrame [%v]: no values were generated", period)
-				continue
-			}
-			if err := s.repo.Put(ctx, currencyPair, period.String(), calculatorOHLC.OHLC()); err != nil {
-				s.logger.Error("Repo.Put: %v", err)
-				//TODO: return or not?
-			}
-			calculatorOHLC.Reset()
-		case r, ok := <-data:
+		case ohlc, ok := <-s.ohlcChannel:
 			if !ok {
-				s.logger.Info("Data channel is closed for %v", period)
+				s.logger.Info("service.CollectOHLC: channel is closed")
 				return
 			}
-			s.logger.Debug("Data recieved: %v", r)
-			calculatorOHLC.Update(r)
-		}
-	}
-}
-
-// TODO:rates should contain only new data and order by time (from old to new)
-func (s *service) sendToTimeFrameGoroutines(ctx context.Context, currencyPair string, rates []ExchangeRate) error {
-	s.logger.Debug("sendToTimeFrameGoroutines: start, currencyPair: %v, rates: %v", currencyPair, rates)
-	defer s.logger.Debug("sendToTimeFrameGoroutines: end")
-
-	index := s.rateFilter.Check(rates)
-	rates = rates[index:]
-	s.logger.Info("Filter rates: take from %v", index)
-
-	select {
-	case <-ctx.Done():
-		s.logger.Info("Context is done: %v", ctx.Err())
-		return ctx.Err()
-	default:
-		for _, timeFrameChannels := range s.currencyPairToTimeFrameChannels[currencyPair] {
-			for _, rate := range rates {
-				timeFrameChannels.ch <- rate
+			if err := s.repo.Put(ctx, ohlc.CurrencyPair, ohlc.TimeFrame, ohlc); err != nil {
+				s.logger.Error("service.CollectOHLC: repo.Put err : %v", err)
 			}
 		}
 	}
-
-	return nil
 }
 
-func (s *service) Get(ctx context.Context, currencyPair string, timeFrame string, options ...Option) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func (s *service) GetMany(ctx context.Context, currencyPair string, timeFrame string, last int64) ([]repo.OHLC, error) {
-	//TODO implement me
-	panic("implement me")
-}
-
-func writeCurrencyRates(ctx context.Context, g gs.GeneratorService, name string, writeChans []chan<- ExchangeRate) {
-
-}
-
-func readCurrencyRates(ctx context.Context, readChans <-chan ExchangeRate) {
-
+func (s *service) StartAnalyzers(ctx context.Context) {
+	for _, analyzer := range s.currencyPairAnalyzers {
+		analyzer.StartReceive(ctx)
+	}
 }

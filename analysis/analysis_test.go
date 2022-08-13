@@ -3,7 +3,9 @@ package analysis
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	gs "mtsbank/analysis/internal/client/generator_service"
+	hs "mtsbank/analysis/internal/client/history_service"
 	"mtsbank/analysis/internal/repo"
 	"mtsbank/analysis/logger"
 	"testing"
@@ -38,42 +40,43 @@ type fakeGenerator struct {
 }
 
 func (f fakeGenerator) Values(ctx context.Context, currencyPair string) ([]gs.ExchangeRateDTO, error) {
-	fmt.Println("fakeGenerator.Values", currencyPair)
-	t := time.Now().Second() % 5
-	fmt.Println(t)
-	return []gs.ExchangeRateDTO{
+	v := []gs.ExchangeRateDTO{
+		{
+			Time: time.Now().Add(time.Duration(-30) * time.Second),
+			Rate: int64(20 + rand.Int63n(10)),
+		},
+		{
+			Time: time.Now().Add(time.Duration(-25) * time.Second),
+			Rate: int64(30 + +rand.Int63n(10)),
+		},
 		{
 			Time: time.Now(),
-			Rate: int64(t),
+			Rate: int64(40 + +rand.Int63n(10)),
 		},
-		//{
-		//	Time: time.Now().Add(time.Duration(-30) * time.Second),
-		//	Rate: int64(20 + len(currencyPair)),
-		//},
-		//{
-		//	Time: time.Now().Add(time.Duration(-25) * time.Second),
-		//	Rate: int64(30 + len(currencyPair)),
-		//},
-		//{
-		//	Time: time.Now(),
-		//	Rate: int64(40 + len(currencyPair)),
-		//},
-	}, nil
+	}
+	for _, r := range v {
+		fmt.Println(currencyPair, r)
+	}
+	return v, nil
 }
-
 func TestName(t *testing.T) {
-	curPair := []string{"AB"}
-	timeFrames := []time.Duration{3 * time.Second}
+	curPair := []string{"EURUSD"}
+	timeFrames := []time.Duration{20 * time.Second}
 	l := logger.New(logger.Debug)
-	repo := fakeRepo{}
-	generator := fakeGenerator{}
-	service := NewService(curPair, timeFrames, generator, l, repo)
+	r := repo.NewInmemoryRepo(l)
+	history, err := hs.NewClientWithResponses("http://localhost:8081")
+	if err != nil {
+		t.Fatal(err)
+	}
+	generator := gs.NewService("localhost:8080", l)
+
+	resetPeriod := 1000 * time.Second
+	pollPeriod := 5 * time.Second
+
+	service := NewService(pollPeriod, curPair, timeFrames, generator, l, r)
 
 	ctx := context.Background()
-	resetPeriod := time.Hour
-	pollPeriod := 1 * time.Second
+	service.Start(ctx, history, resetPeriod)
 
-	go service.StartTimeFrameGoroutines(ctx, resetPeriod)
-
-	service.CollectNewRates(ctx, pollPeriod)
+	select {}
 }
