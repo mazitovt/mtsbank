@@ -7,11 +7,6 @@ type Cache[T any] interface {
 	Values() []T
 }
 
-type Cache1 interface {
-	Add(v int)
-	Values() []int
-}
-
 var _ Cache[any] = (*LimitedCache[any])(nil)
 
 type LimitedCache[T any] struct {
@@ -43,5 +38,10 @@ func (l *LimitedCache[T]) Add(v T) {
 func (l *LimitedCache[T]) Values() []T {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
-	return l.s[:]
+
+	r := make([]T, len(l.s))
+	copy(r[:len(r)-l.index], l.s[l.index:])
+	copy(r[len(r)-l.index:], l.s[:l.index])
+
+	return r
 }

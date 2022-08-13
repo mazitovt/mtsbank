@@ -36,6 +36,7 @@ func Init() (*Config, error) {
 		return nil, ErrMinimalCacheSize
 	}
 
+	//TODO: dont return error, continue execution with period = 1s
 	if cfg.Period < time.Second {
 		return nil, ErrMinimalPeriod
 	}
