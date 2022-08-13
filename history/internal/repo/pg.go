@@ -106,7 +106,7 @@ func (r *RepoPG) Insert(ctx context.Context, data []RegistryRow) error {
 	valueArgs := make([]interface{}, 0, len(data)*3)
 	for i, v := range data {
 		valueStrings = append(valueStrings, fmt.Sprintf("($%d, $%d, $%d)", 3*i+1, 3*i+2, 3*i+3))
-		valueArgs = append(valueArgs, v.CurrencyPair, v.Time, v.Rate)
+		valueArgs = append(valueArgs, v.CurrencyPair, v.Time.Round(time.Microsecond), v.Rate)
 	}
 	stmt := fmt.Sprintf("INSERT INTO registry(name, creation_time, rate) VALUES %s ON CONFLICT DO NOTHING",
 		strings.Join(valueStrings, ","))
@@ -238,13 +238,13 @@ func (r *RepoPG) Migrate() error {
 
 CREATE TABLE registry(
                         name text REFERENCES currency_pair(name) NOT NULL,
-                        creation_time timestamp NOT NULL,
+                        creation_time timestamptz NOT NULL,
                         rate INT NOT NULL,
                         PRIMARY KEY (name, creation_time)
 
 );
 
-INSERT INTO currency_pair(name) VALUES ('EURUSD'), ('USDRUB'),('USDJPY');
+INSERT INTO currency_pair(name) VALUES ('EURUSD');
 `
 
 	_, err = tx.ExecContext(context.Background(), q)
