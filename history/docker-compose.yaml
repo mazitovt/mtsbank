@@ -4,7 +4,9 @@ services:
 
   postgres:
     image: postgres:14.3-alpine3.16
+    command: ["postgres", "-c", "log_statement=all"]
     environment:
+      TZ: "GMT-5"
       POSTGRES_DB: "history"
       POSTGRES_USER: "history"
       POSTGRES_PASSWORD: "history"
