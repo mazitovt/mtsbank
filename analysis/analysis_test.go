@@ -6,6 +6,7 @@ import (
 	"math/rand"
 	gs "mtsbank/analysis/internal/client/generator_service"
 	hs "mtsbank/analysis/internal/client/history_service"
+	"mtsbank/analysis/internal/model"
 	"mtsbank/analysis/internal/repo"
 	"mtsbank/analysis/logger"
 	"testing"
@@ -15,18 +16,18 @@ import (
 type fakeRepo struct {
 }
 
-func (f fakeRepo) Put(ctx context.Context, currencyPair string, timeFrame string, ohlc repo.OHLC) error {
+func (f fakeRepo) Put(ctx context.Context, currencyPair string, timeFrame string, ohlc model.OHLC) error {
 	fmt.Println("fakeRepo.Put: ", currencyPair, timeFrame, ohlc)
 	fmt.Printf("%+v", ohlc)
 	return nil
 }
 
-func (f fakeRepo) Get(ctx context.Context, currencyPair string, timeFrame string) (*repo.OHLC, error) {
+func (f fakeRepo) Get(ctx context.Context, currencyPair string, timeFrame string) (*model.OHLC, error) {
 	//TODO implement me
 	panic("implement me")
 }
 
-func (f fakeRepo) GetMany(ctx context.Context, currencyPair string, timeFrame string, last int64) ([]repo.OHLC, error) {
+func (f fakeRepo) GetMany(ctx context.Context, currencyPair string, timeFrame string, last int64) ([]model.OHLC, error) {
 	//TODO implement me
 	panic("implement me")
 }
@@ -59,10 +60,11 @@ func (f fakeGenerator) Values(ctx context.Context, currencyPair string) ([]gs.Ex
 	}
 	return v, nil
 }
-func TestName(t *testing.T) {
+
+func TestName1(t *testing.T) {
 	curPair := []string{"EURUSD"}
-	timeFrames := []time.Duration{20 * time.Second}
-	l := logger.New(logger.Debug)
+	timeFrames := []time.Duration{5 * time.Second, 10 * time.Second}
+	l := logger.New(logger.Info)
 	r := repo.NewInmemoryRepo(l)
 	history, err := hs.NewClientWithResponses("http://localhost:8081")
 	if err != nil {
@@ -70,13 +72,32 @@ func TestName(t *testing.T) {
 	}
 	generator := gs.NewService("localhost:8080", l)
 
-	resetPeriod := 1000 * time.Second
-	pollPeriod := 5 * time.Second
+	resetPeriod := 30 * time.Second
+	pollPeriod := 30 * time.Second
+	batchPeriod := 30 * time.Second
+	batchSize := 1
 
 	service := NewService(pollPeriod, curPair, timeFrames, generator, l, r)
 
-	ctx := context.Background()
-	service.Start(ctx, history, resetPeriod)
+	ctx, cancel := context.WithCancel(context.Background())
 
-	select {}
+	go func() {
+		time.Sleep(1 * time.Second)
+		cancel()
+		fmt.Println("CONTEXT IS DONE")
+	}()
+
+	service.Start(ctx, history, resetPeriod, batchPeriod, batchSize)
+
+	for c, tm := range r.GetAll() {
+		fmt.Println(c)
+		if tm != nil {
+			for tf, s := range tm {
+				fmt.Println(tf)
+				for _, v := range s {
+					fmt.Println(v)
+				}
+			}
+		}
+	}
 }

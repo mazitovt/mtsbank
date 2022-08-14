@@ -1,39 +1,24 @@
+// TODO: StartCollectNewRates and CollectHistory are simlilar.
+// TODO: ticker isn't suitable bc it wait for time before first tick
+
 package analysis
 
 import (
 	"context"
 	"errors"
+	analyzer "mtsbank/analysis/internal/analyzer"
 	gs "mtsbank/analysis/internal/client/generator_service"
 	hs "mtsbank/analysis/internal/client/history_service"
+	"mtsbank/analysis/internal/model"
 	"mtsbank/analysis/internal/repo"
 	"mtsbank/analysis/logger"
 	"sync"
 	"time"
 )
 
-type ExchangeRate struct {
-	Time time.Time
-	Rate int64
-}
-
-type Option interface {
-	apply()
-}
-
-type Analyzer interface {
-	Get(ctx context.Context, currencyPair string, timeFrame string, options ...Option)
-	GetMany(ctx context.Context, currencyPair string, timeFrame string, last int64) ([]repo.OHLC, error)
-
-	// Start in G
-	CollectNewRates(ctx context.Context)
-	// Start in G
-	CollectHistory(ctx context.Context, h hs.HistoryService) error
-}
-
 type service struct {
 	pollPeriod            time.Duration
-	currencyPairAnalyzers map[string]*CurrencyPairAnalyzer
-	ohlcChannel           <-chan repo.OHLC
+	currencyPairAnalyzers []analyzer.Analyzer
 	generator             gs.GeneratorService
 	logger                logger.Logger
 	repo                  repo.Repo
@@ -41,179 +26,166 @@ type service struct {
 
 func NewService(pollPeriod time.Duration, currencyPairs []string, timeFrames []time.Duration, generator gs.GeneratorService, logger logger.Logger, r repo.Repo) *service {
 
-	ohlcChannel := make(chan repo.OHLC, 1)
-
-	m := map[string]*CurrencyPairAnalyzer{}
-	for _, currencyPair := range currencyPairs {
-		m[currencyPair] = NewCurrencyPairAnalyzer(currencyPair, timeFrames, ohlcChannel, logger)
+	s := make([]analyzer.Analyzer, len(currencyPairs))
+	for i, currencyPair := range currencyPairs {
+		s[i] = analyzer.NewCurrencyPairAnalyzer(currencyPair, timeFrames, r, logger)
 	}
 
 	return &service{
 		pollPeriod:            pollPeriod,
-		currencyPairAnalyzers: m,
-		ohlcChannel:           ohlcChannel,
+		currencyPairAnalyzers: s,
 		generator:             generator,
 		logger:                logger,
 		repo:                  r,
 	}
 }
 
-func (s *service) Start(
-	ctx context.Context,
-	h hs.HistoryService,
-	resetPeriod time.Duration) {
+func (s *service) Start(ctx context.Context, h hs.HistoryService, resetPeriod time.Duration, batchPeriod time.Duration, batchSize int) {
+	s.logger.Debug("service.Start: start")
+	defer s.logger.Debug("service.Start: end")
 
-	//call history
+	historyCollected := make(chan struct{}, 0)
 	go func() {
-		err := s.CollectHistory(ctx, h)
-		if err != nil {
-			s.logger.Error("service.Start: CollectHistory returned err: %v", err)
-		}
+		historyCollected <- struct{}{}
 	}()
 
 	for {
 		select {
 		case <-ctx.Done():
-			s.logger.Info("service.Start:  context is done; %v", ctx.Err())
 			return
 		default:
-			s.logger.Debug("")
-			s.logger.Debug("service.Start: new cycle")
+			// create new context with timeout
 			resetCtx, cancel := context.WithTimeout(ctx, resetPeriod)
 
+			s.logger.Info("START NEW CYCLE")
+
 			wg := sync.WaitGroup{}
-			// start collecting
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				s.StartAnalyzers(resetCtx)
-			}()
+			wg.Add(len(s.currencyPairAnalyzers))
+			for i := range s.currencyPairAnalyzers {
+				go func(i int) {
+					defer wg.Done()
+					s.currencyPairAnalyzers[i].Start(resetCtx, batchPeriod, batchSize)
+				}(i)
+			}
 
-			// start polling
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				err := s.CollectNewRates(resetCtx)
-				if err != nil {
-					s.logger.Error("service.Start: CollectNewRates returned err: %v", err)
-				}
-			}()
+			select {
+			case <-historyCollected:
+				historyCollected = nil
+				s.CollectHistory(resetCtx, h)
+			default:
+			}
 
-			// collect OHLC and send to repo
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				s.CollectOHLC(resetCtx)
-			}()
+			go s.StartCollectNewRates(resetCtx)
 
 			wg.Wait()
-			s.logger.Info("service.Start: resetCtx is done")
+
 			s.repo.Reset(context.TODO())
 
 			cancel()
-		}
-	}
 
-}
-
-// TODO: remove error or return meaningful errors (currently always returns nil)
-func (s *service) CollectNewRates(ctx context.Context) error {
-	s.logger.Debug("service.CollectNewRates: start")
-	defer s.logger.Debug("service.CollectNewRates: end")
-
-	pollTicker := time.NewTicker(s.pollPeriod)
-	defer pollTicker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			s.logger.Info("service.CollectNewRates: context is done: %v", ctx.Err())
-			return nil
-		case <-pollTicker.C:
-			// TODO : add WaitGroup
-			for currencyPair, analyzer := range s.currencyPairAnalyzers {
-
-				values, err := s.generator.Values(ctx, currencyPair)
-				if err != nil {
-					s.logger.Error("GeneratorService.Values: %v", err)
-					return err
-				}
-				rates := make([]ExchangeRate, len(values))
-				for i := 0; i < len(rates); i++ {
-					rates[i] = ExchangeRate{
-						Time: values[i].Time,
-						Rate: values[i].Rate,
-					}
-				}
-
-				analyzer.Send(ctx, rates)
-			}
+			s.logger.Info("CYCLE IS OVER")
 		}
 	}
 }
 
 var ErrResponseParse = errors.New("HistoryService responded with unparsed body")
 
-func (s *service) CollectHistory(ctx context.Context, h hs.HistoryService) error {
-	s.logger.Debug("service.CollectHistory: start")
-	defer s.logger.Debug("service.CollectHistory: end")
+// StartCollectNewRates periodically request new rates from generator and sends to analyzers
+// StartCollectNewRates is not thread-safe
+// Blocks until context is done
+func (s *service) StartCollectNewRates(ctx context.Context) {
+	s.logger.Info("service.StartCollectNewRates: start")
+	defer s.logger.Info("service.StartCollectNewRates: end")
+
+	pollTicker := time.NewTicker(s.pollPeriod)
+	defer pollTicker.Stop()
+
+	select {
+	case <-ctx.Done():
+		return
+	default:
+
+	}
+
+	for {
+
+		wg := sync.WaitGroup{}
+		wg.Add(len(s.currencyPairAnalyzers))
+
+		for index := range s.currencyPairAnalyzers {
+			go func(index int) {
+				defer wg.Done()
+				a := s.currencyPairAnalyzers[index]
+				values, err := s.generator.Values(ctx, a.CurrencyPair())
+				if err != nil {
+					s.logger.Error("GeneratorService.Values err: %v", err)
+					return
+				}
+				rates := make([]model.ExchangeRate, len(values))
+				for i := 0; i < len(rates); i++ {
+					rates[i] = model.ExchangeRate{
+						Time: values[i].Time,
+						Rate: values[i].Rate,
+					}
+				}
+
+				a.Put(ctx, rates)
+			}(index)
+		}
+
+		wg.Wait()
+		select {
+		case <-ctx.Done():
+			return
+		case <-pollTicker.C:
+			continue
+		}
+	}
+}
+
+// CollectHistory request all rates from begging of this day to current time
+// CollectHistory is not thread-safe
+// Blocks until all analysers received their all values
+func (s *service) CollectHistory(ctx context.Context, h hs.HistoryService) {
+	s.logger.Info("service.CollectHistory: start")
+	defer s.logger.Info("service.CollectHistory: end")
 
 	dayStart := time.Now().Truncate(24 * time.Hour)
 	now := time.Now()
 
-	for currencyPair, currencyPairAnalyzer := range s.currencyPairAnalyzers {
-		resp, err := h.GetRatesCurrencyPairWithResponse(ctx, currencyPair, &hs.GetRatesCurrencyPairParams{
-			From: &dayStart,
-			To:   &now,
-		})
-		if err != nil {
-			s.logger.Error("HistoryService.GetRatesCurrencyPairWithResponse: %v", err)
-			return err
-		}
-		if resp.JSON200 == nil {
-			s.logger.Warn("Couldn't extract values from response, status: %v, code: %v", resp.Status(), resp.StatusCode())
-			return ErrResponseParse
-		}
+	wg := sync.WaitGroup{}
+	wg.Add(len(s.currencyPairAnalyzers))
 
-		s.logger.Info("Values from HistoryService: %v", *resp.JSON200)
-
-		rates := make([]ExchangeRate, len(*resp.JSON200))
-		for i := 0; i < len(rates); i++ {
-			rates[i] = ExchangeRate{
-				Time: (*resp.JSON200)[i].Time,
-				Rate: (*resp.JSON200)[i].Rate,
-			}
-		}
-
-		currencyPairAnalyzer.Send(ctx, rates)
-	}
-
-	return nil
-}
-
-func (s *service) CollectOHLC(ctx context.Context) {
-	s.logger.Debug("service.CollectOHLC: start")
-	defer s.logger.Debug("service.CollectOHLC: end")
-
-	for {
-		select {
-		case <-ctx.Done():
-			s.logger.Info("service.CollectOHLC: context is done: %v", ctx.Err())
-			return
-		case ohlc, ok := <-s.ohlcChannel:
-			if !ok {
-				s.logger.Info("service.CollectOHLC: channel is closed")
+	for index := range s.currencyPairAnalyzers {
+		go func(index int) {
+			defer wg.Done()
+			a := s.currencyPairAnalyzers[index]
+			resp, err := h.GetRatesCurrencyPairWithResponse(ctx, a.CurrencyPair(), &hs.GetRatesCurrencyPairParams{
+				From: &dayStart,
+				To:   &now,
+			})
+			if err != nil {
+				s.logger.Error("HistoryService.GetRatesCurrencyPairWithResponse: %v", err)
 				return
 			}
-			if err := s.repo.Put(ctx, ohlc.CurrencyPair, ohlc.TimeFrame, ohlc); err != nil {
-				s.logger.Error("service.CollectOHLC: repo.Put err : %v", err)
+			if resp.JSON200 == nil {
+				s.logger.Warn("Couldn't extract values from response, status: %v, code: %v", resp.Status(), resp.StatusCode())
+				return
 			}
-		}
-	}
-}
 
-func (s *service) StartAnalyzers(ctx context.Context) {
-	for _, analyzer := range s.currencyPairAnalyzers {
-		analyzer.StartReceive(ctx)
+			s.logger.Debug("Values from HistoryService: %v", *resp.JSON200)
+
+			rates := make([]model.ExchangeRate, len(*resp.JSON200))
+			for i := range rates {
+				rates[i] = model.ExchangeRate{
+					Time: (*resp.JSON200)[i].Time,
+					Rate: (*resp.JSON200)[i].Rate,
+				}
+			}
+
+			s.currencyPairAnalyzers[index].Put(ctx, rates)
+		}(index)
 	}
+
+	wg.Wait()
 }
