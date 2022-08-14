@@ -140,7 +140,7 @@ func (r *RepoPG) GetByTime(ctx context.Context, currencyPair string, start time.
 		}
 	}()
 
-	q := "SELECT name, creation_time, rate FROM registry WHERE name = $1 AND creation_time >= $2 AND creation_time <= $3"
+	q := "SELECT name, creation_time, rate FROM registry WHERE name = $1 AND creation_time >= $2 AND creation_time <= $3 ORDER BY creation_time"
 	r.logger.Info("RepoPG.GetByTime: query: %s", q)
 
 	rows, err := tx.QueryContext(ctx, q, currencyPair, start, end)

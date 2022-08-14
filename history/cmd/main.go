@@ -81,19 +81,22 @@ func checkErr(err error) {
 
 // TODO: encapsulate to HistoryService
 func startCollecting(ctx context.Context, h history.HistoryService, period time.Duration, l logger.Logger) {
+
+	ticker := time.NewTicker(period)
+	defer ticker.Stop()
+
 	for {
+		err := h.CollectExchangeRates(ctx)
+		if err != nil {
+			l.Error("HistoryService.CollectExchangeRates: %v", err)
+		}
+
 		select {
 		case <-ctx.Done():
 			fmt.Println("stop generating")
 			return
-		default:
-			err := h.CollectExchangeRates(ctx)
-			if err != nil {
-				l.Error("HistoryService.CollectExchangeRates: %v", err)
-				l.Info("stop collecting")
-				return
-			}
-			time.Sleep(period)
+		case <-ticker.C:
+			continue
 		}
 	}
 }
