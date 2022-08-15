@@ -3,7 +3,7 @@ package app
 import (
 	"fmt"
 	"generator/app/cache"
-	"generator/app/logger"
+	"github.com/mazitovt/logger"
 	"math/rand"
 	"time"
 )

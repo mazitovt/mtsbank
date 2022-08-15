@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"generator/app"
 	"generator/app/config"
-	"generator/app/logger"
+	"github.com/mazitovt/logger"
 	"log"
 	"net/http"
 	"os"
