@@ -2,8 +2,8 @@ package repo
 
 import (
 	"context"
+	"github.com/mazitovt/logger"
 	"mtsbank/analysis/internal/model"
-	"mtsbank/analysis/logger"
 	"sync"
 )
 
@@ -24,8 +24,9 @@ type InmemoryRepo struct {
 }
 
 func (r *InmemoryRepo) PutMany(ctx context.Context, ohlcs []model.OHLC) error {
-	r.logger.Info("InmemoryRepo.PutMany: start: %v", len(ohlcs))
-	defer r.logger.Info("InmemoryRepo.PutMany: end: %v", len(ohlcs))
+	r.logger.Debug("InmemoryRepo.PutMany: start: %v", len(ohlcs))
+	defer r.logger.Debug("InmemoryRepo.PutMany: end: %v", len(ohlcs))
+	r.logger.Info("InmemoryRepo.PutMany: ohlcs: %v", ohlcs)
 	for _, ohlc := range ohlcs {
 		_ = r.Put(ctx, ohlc.CurrencyPair, ohlc.TimeFrame.String(), ohlc)
 	}
@@ -38,6 +39,12 @@ func NewInmemoryRepo(logger logger.Logger) *InmemoryRepo {
 
 func (r *InmemoryRepo) Put(ctx context.Context, currencyPair string, timeFrame string, ohlc model.OHLC) error {
 	r.logger.Debug("InmemoryRepo.Put: %v %v %v", currencyPair, timeFrame, ohlc)
+
+	select {
+	default:
+	case <-ctx.Done():
+		return nil
+	}
 
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -66,6 +73,8 @@ func (r *InmemoryRepo) GetMany(ctx context.Context, currencyPair string, timeFra
 }
 
 func (r *InmemoryRepo) Reset(ctx context.Context) {
+	//r.mu.Lock()
+	//defer r.mu.Unlock()
 	//r.m = map[string]map[string][]model.OHLC{}
 }
 
