@@ -3,7 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
-	"generator/app"
+	"generator/internal"
 	"time"
 )
 import "github.com/kelseyhightower/envconfig"
@@ -44,12 +44,12 @@ func Init() (*Config, error) {
 	return cfg, nil
 }
 
-func GetGeneratorFunc(cfg *Config) (app.GeneratorFunc, error) {
+func GetGeneratorFunc(cfg *Config) (internal.GeneratorFunc, error) {
 	switch cfg.Pattern {
 	case "TIME":
-		return app.ExchangeRateFromTime, nil
+		return internal.ExchangeRateFromTime, nil
 	case "SEED":
-		return app.NewExchangeRateFromSeed(cfg.Seed), nil
+		return internal.NewExchangeRateFromSeed(cfg.Seed), nil
 	}
 	return nil, fmt.Errorf("unknown pattern: %s", cfg.Pattern)
 }

@@ -7,7 +7,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/mazitovt/logger"
 	"log"
-	"mtsbank/history"
+	"mtsbank/history/internal"
 	v1 "mtsbank/history/internal/api/http/v1"
 	"mtsbank/history/internal/client/generator_service"
 	"mtsbank/history/internal/config"
@@ -51,7 +51,7 @@ func main() {
 
 	generatorClient := generator_service.NewService(net.JoinHostPort(cfg.Generator.Host, cfg.Generator.Port), l)
 
-	g := history.NewSimpleHistoryService(repoPG, generatorClient, l)
+	g := internal.NewSimpleHistoryService(repoPG, generatorClient, l)
 
 	// This is how you set up a basic chi router
 	r := chi.NewRouter()
@@ -80,7 +80,7 @@ func checkErr(err error) {
 }
 
 // TODO: encapsulate to HistoryService
-func startCollecting(ctx context.Context, h history.HistoryService, period time.Duration, l logger.Logger) {
+func startCollecting(ctx context.Context, h internal.HistoryService, period time.Duration, l logger.Logger) {
 
 	ticker := time.NewTicker(period)
 	defer ticker.Stop()

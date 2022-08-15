@@ -1,8 +1,8 @@
-package app
+package internal
 
 import (
 	"fmt"
-	"generator/app/cache"
+	"generator/pkg/cache"
 	"github.com/mazitovt/logger"
 	"math/rand"
 	"time"

@@ -4,8 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"generator/app"
-	"generator/app/config"
+	"generator/internal"
+	"generator/internal/config"
 	"github.com/mazitovt/logger"
 	"log"
 	"net/http"
@@ -23,7 +23,7 @@ func main() {
 	f, err := config.GetGeneratorFunc(cfg)
 	checkErr(err)
 
-	g := app.NewSimplePriceGenerator(cfg.CurrencyPairs, f, uint64(cfg.CacheSize), logger.New(logger.Debug))
+	g := internal.NewSimplePriceGenerator(cfg.CurrencyPairs, f, uint64(cfg.CacheSize), logger.New(logger.Debug))
 
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -66,7 +66,7 @@ func checkErr(err error) {
 	}
 }
 
-func startGenerate(ctx context.Context, g app.PriceGenerator, period time.Duration) {
+func startGenerate(ctx context.Context, g internal.PriceGenerator, period time.Duration) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -79,7 +79,7 @@ func startGenerate(ctx context.Context, g app.PriceGenerator, period time.Durati
 	}
 }
 
-func newHandler(g app.PriceGenerator) http.HandlerFunc {
+func newHandler(g internal.PriceGenerator) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 
 		if !r.URL.Query().Has("currency_pair") {
