@@ -6,6 +6,7 @@ import (
 	"fmt"
 	_ "github.com/lib/pq"
 	"github.com/mazitovt/logger"
+	api "mtsbank/history/internal/api/http/v1"
 	"mtsbank/history/internal/config"
 	"strings"
 	"time"
@@ -17,6 +18,36 @@ type RepoPG struct {
 	tableName string
 	db        *sql.DB
 	logger    logger.Logger
+}
+
+func NewRepoPG(cfg *config.PostgresConfig, logger logger.Logger) (*RepoPG, error) {
+	dsn := fmt.Sprintf("user=%s password=%s host=%s port=%s dbname=%s sslmode=%s", cfg.User, cfg.Password, cfg.Host, cfg.Port, cfg.DBname, cfg.Sslmode)
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		return nil, err
+	}
+	if err = db.Ping(); err != nil {
+		return nil, err
+	}
+	return &RepoPG{
+		tableName: "currency_pair",
+		db:        db,
+		logger:    logger,
+	}, nil
+}
+
+func (r *RepoPG) InsertWithCurrencyPair(ctx context.Context, currencyPair string, data []api.ExchangeRate) error {
+	// TODO: use sync.Pool
+	registryRows := make([]RegistryRow, len(data))
+	for i := range data {
+		registryRows[i] = RegistryRow{
+			CurrencyPair: currencyPair,
+			Time:         data[i].Time,
+			Rate:         data[i].Rate,
+		}
+	}
+
+	return r.Insert(ctx, registryRows)
 }
 
 func (r *RepoPG) Currencies(ctx context.Context) ([]string, error) {
@@ -70,22 +101,6 @@ func (r *RepoPG) Currencies(ctx context.Context) ([]string, error) {
 	}
 
 	return currencies, nil
-}
-
-func NewRepoPG(cfg *config.PostgresConfig, logger logger.Logger) (*RepoPG, error) {
-	dsn := fmt.Sprintf("user=%s password=%s host=%s port=%s dbname=%s sslmode=%s", cfg.User, cfg.Password, cfg.Host, cfg.Port, cfg.DBname, cfg.Sslmode)
-	db, err := sql.Open("postgres", dsn)
-	if err != nil {
-		return nil, err
-	}
-	if err = db.Ping(); err != nil {
-		return nil, err
-	}
-	return &RepoPG{
-		tableName: "currency_pair",
-		db:        db,
-		logger:    logger,
-	}, nil
 }
 
 func (r *RepoPG) Insert(ctx context.Context, data []RegistryRow) error {

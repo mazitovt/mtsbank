@@ -1,0 +1,100 @@
+openapi: "3.0.0"
+info:
+  title: Analysis service
+  description: Analysis service collects exchange rates for currency pairs and calculates OHLC parameters
+  version: 1.0.0
+components:
+  schemas:
+    OHLC:
+      type: object
+      required:
+        - open
+        - high
+        - low
+        - close
+        - open_time
+        - close_time
+      properties:
+        open:
+          type: integer
+          format: int64
+        high:
+          type: integer
+          format: int64
+        low:
+          type: integer
+          format: int64
+        close:
+          type: integer
+          format: int64
+        open_time:
+          type: string
+          format: date-time
+        close_time:
+          type: string
+          format: date-time
+    Error:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: integer
+          format: int32
+        message:
+          type: string
+paths:
+  "/rates/{currency_pair}/{time_frame}":
+    get:
+      description: Get OHLC for currency pair and time frame
+      summary: Get OHLC for currency pair and time frame
+      parameters:
+        - in: path
+          description: Currency pair
+          name: currency_pair
+          required: true
+          schema:
+            type: string
+        - in: path
+          description: Time frame
+          name: time_frame
+          required: true
+          schema:
+            type: string
+            format: iso8601
+            description: Time frame period expressed as an iso8601 duration
+            example: PT1M
+        - in: query
+          name: last
+          description: Limit of the number of values in returned array
+          schema:
+            type: integer
+            format: int64
+        - in: query
+          name: from
+          description: Starting point
+          schema:
+            type: string
+            format: date-time
+        - in: query
+          name: to
+          description: Upper bound
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: List of ohlc
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/OHLC'
+        default:
+          description: unexpected error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'

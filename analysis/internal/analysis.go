@@ -1,18 +1,32 @@
-// TODO: StartCollectNewRates and CollectHistory are simlilar.
+// TODO: StartCollectNewRates and CollectHistory are similar.
 
 package internal
 
 import (
 	"context"
+	"encoding/json"
 	"github.com/mazitovt/logger"
+	"github.com/sosodev/duration"
 	"mtsbank/analysis/internal/analyzer"
+	api "mtsbank/analysis/internal/api/http/v1"
 	gs "mtsbank/analysis/internal/client/generator_service"
 	hs "mtsbank/analysis/internal/client/history_service"
 	"mtsbank/analysis/internal/model"
 	"mtsbank/analysis/internal/repo"
+	"net/http"
 	"sync"
 	"time"
 )
+
+var poolOHLC = sync.Pool{New: func() any {
+	return []model.OHLC{}
+}}
+
+var poolOHLCDTO = sync.Pool{New: func() any {
+	return []api.OHLC{}
+}}
+
+var _ api.ServerInterface = (*service)(nil)
 
 type service struct {
 	currencyPairAnalyzers []analyzer.Analyzer
@@ -27,6 +41,105 @@ type service struct {
 	repo      repo.Repo
 
 	logger logger.Logger
+}
+
+func (s *service) GetRatesCurrencyPairTimeFrame(w http.ResponseWriter, r *http.Request, currencyPair string, timeFrame string, params api.GetRatesCurrencyPairTimeFrameParams) {
+
+	d, err := duration.Parse(timeFrame)
+	if err != nil {
+		s.writeError(w, http.StatusBadRequest, "invalid time frame (check ISO 8601)")
+		return
+	}
+
+	timeFrame = d.ToTimeDuration().String()
+
+	buffer := poolOHLC.Get().([]model.OHLC)
+	buffer = buffer[:0]
+	defer poolOHLC.Put(buffer)
+
+	out := poolOHLCDTO.Get().([]api.OHLC)
+	out = out[:0]
+	defer poolOHLCDTO.Put(out)
+
+	writeRepoErr := func(err error) {
+		switch err {
+		case repo.ErrBadTimeFrame, repo.ErrBadCurrencyPair, repo.ErrBadCurrencyPairOrTimeFrame:
+			s.writeError(w, http.StatusBadRequest, err.Error())
+		default:
+			s.writeError(w, http.StatusInternalServerError, "internal error")
+		}
+	}
+
+	//TODO: define rules in swagger
+	switch {
+	case params.Last != nil:
+		buffer, err = s.repo.GetMany(r.Context(), currencyPair, timeFrame, *params.Last, buffer)
+		if err != nil {
+			writeRepoErr(err)
+			return
+		}
+		for i := range buffer {
+			out = append(out, api.OHLC{
+				Close:     buffer[i].Close,
+				CloseTime: buffer[i].CloseTime,
+				High:      buffer[i].High,
+				Low:       buffer[i].Low,
+				Open:      buffer[i].Open,
+				OpenTime:  buffer[i].OpenTime,
+			})
+		}
+	case params.To != nil && params.From != nil:
+		buffer, err = s.repo.GetMany(r.Context(), currencyPair, timeFrame, *params.Last, buffer)
+		if err != nil {
+			writeRepoErr(err)
+			return
+		}
+		for i := range buffer {
+			out = append(out, api.OHLC{
+				Close:     buffer[i].Close,
+				CloseTime: buffer[i].CloseTime,
+				High:      buffer[i].High,
+				Low:       buffer[i].Low,
+				Open:      buffer[i].Open,
+				OpenTime:  buffer[i].OpenTime,
+			})
+		}
+	default:
+		ohlc, err := s.repo.GetLast(r.Context(), currencyPair, timeFrame)
+		if err != nil {
+			writeRepoErr(err)
+			return
+		}
+
+		out = append(out, api.OHLC{
+			Close:     ohlc.Close,
+			CloseTime: ohlc.CloseTime,
+			High:      ohlc.High,
+			Low:       ohlc.Low,
+			Open:      ohlc.Open,
+			OpenTime:  ohlc.OpenTime,
+		})
+	}
+
+	// content is set to application/json only that order
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+
+	if err = json.NewEncoder(w).Encode(out); err != nil {
+		s.logger.Error("SimpleHistoryService.writeError: err: %v", err)
+	}
+}
+
+func (s *service) writeError(w http.ResponseWriter, code int, message string) {
+	petErr := api.Error{
+		Code:    int32(code),
+		Message: message,
+	}
+	w.WriteHeader(code)
+	err := json.NewEncoder(w).Encode(petErr)
+	if err != nil {
+		s.logger.Error("SimpleHistoryService.writeError: err: %v", err)
+	}
 }
 
 func NewService(
@@ -168,24 +281,17 @@ func (s *service) collectNewRates(ctx context.Context, in chan<- []model.Exchang
 	s.logger.Debug("service.collectNewRates2: start")
 	defer s.logger.Debug("service.collectNewRates2: end")
 
-	values, err := s.generator.Values(ctx, currencyPair)
-
-	if err == context.Canceled || err == context.DeadlineExceeded {
-		return
-	} else if err != nil {
-		s.logger.Error("GeneratorService.Values err: %v", err)
+	//TODO: make use of sync.Pool
+	//
+	//cant use sync.Pool bc writing slice to channel in (reading side should put slice back to pool somehow)
+	out := make([]model.ExchangeRate, 0)
+	out, err := s.generator.GetRates(ctx, currencyPair, out)
+	if err != nil && err != gs.ErrBufferGrow {
+		s.logger.Error("cant collect new rates: %v", err)
 		return
 	}
 
-	rates := make([]model.ExchangeRate, len(values))
-	for i := 0; i < len(rates); i++ {
-		rates[i] = model.ExchangeRate{
-			Time: values[i].Time,
-			Rate: values[i].Rate,
-		}
-	}
-
-	in <- rates
+	in <- out
 }
 
 func (s *service) storeOHLC(in <-chan model.OHLC, batchPeriod time.Duration, batchSize int) {

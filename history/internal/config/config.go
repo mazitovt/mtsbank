@@ -16,10 +16,11 @@ var (
 
 type (
 	Config struct {
-		Host      string
-		Port      string
-		Period    time.Duration
-		Migrate   bool
+		LogLevel  string         `envconfig:"LOG_LEVEL"`
+		Host      string         `envconfig:"HOST"`
+		Port      string         `envconfig:"PORT"`
+		Period    time.Duration  `envconfig:"PERIOD"`
+		Migrate   bool           `envconfig:"MIGRATE"`
 		Postgres  PostgresConfig `envconfig:"POSTGRES"`
 		Generator Generator      `envconfig:"GENERATOR"`
 	}

@@ -6,8 +6,8 @@ networks:
     external: true
 
 services:
-  generator:
-    image: generator-service
+  analysis:
+    image: analysis-service
     build:
       context: .
       dockerfile: Dockerfile
@@ -16,6 +16,6 @@ services:
     env_file:
       - .env
     ports:
-      - "8081:8080"
+      - "8083:8080"
     networks:
-    - service-network-1
+      - service-network-1

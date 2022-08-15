@@ -2,7 +2,6 @@ package main
 
 import (
 	"context"
-	"fmt"
 	"generator/internal"
 	"generator/internal/api/http/v1"
 	"generator/internal/config"
@@ -40,10 +39,7 @@ func main() {
 
 	// configure router
 	swagger, err := v1.GetSwagger()
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "Error loading swagger spec\n: %s", err)
-		os.Exit(1)
-	}
+	checkErr(err)
 
 	swagger.Servers = nil
 

@@ -16,6 +16,8 @@ var (
 
 type (
 	Config struct {
+		LogLevel      string          `envconfig:"LOG_LEVEL"`
+		Batch         Batch           `envconfig:"BATCH"`
 		Http          Http            `envconfig:"HTTP"`
 		CurrencyPairs []string        `envconfig:"CURRENCY_PAIRS"`
 		TimeFrames    []time.Duration `envconfig:"TIME_FRAMES"`
@@ -23,6 +25,11 @@ type (
 		RestartAfter  time.Duration   `envconfig:"RESTART_AFTER"`
 		History       HttpService     `envconfig:"HISTORY"`
 		Generator     HttpService     `envconfig:"GENERATOR"`
+	}
+
+	Batch struct {
+		Period time.Duration `envconfig:"PERIOD"`
+		Size   int64         `envconfig:"SIZE"`
 	}
 
 	Http struct {
