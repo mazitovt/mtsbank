@@ -9,6 +9,7 @@ require (
 	github.com/google/go-cmp v0.5.8
 	github.com/kelseyhightower/envconfig v1.4.0
 	github.com/lib/pq v1.10.6
+	github.com/mazitovt/logger v0.0.0-20220815101159-9e824ce57892
 	github.com/stretchr/testify v1.8.0
 	github.com/testcontainers/testcontainers-go v0.13.0
 	gotest.tools/v3 v3.3.0

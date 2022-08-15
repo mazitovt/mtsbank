@@ -5,8 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	_ "github.com/lib/pq"
+	"github.com/mazitovt/logger"
 	"mtsbank/history/internal/config"
-	"mtsbank/history/logger"
 	"strings"
 	"time"
 )

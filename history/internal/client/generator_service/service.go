@@ -3,7 +3,7 @@ package generator_service
 import (
 	"context"
 	"encoding/json"
-	"mtsbank/history/logger"
+	"github.com/mazitovt/logger"
 	"net/http"
 	"net/url"
 )

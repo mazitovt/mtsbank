@@ -4,10 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/mazitovt/logger"
 	"github.com/testcontainers/testcontainers-go"
 	"github.com/testcontainers/testcontainers-go/wait"
 	"mtsbank/history/internal/config"
-	"mtsbank/history/logger"
 	"testing"
 	"time"
 )

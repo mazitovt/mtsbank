@@ -3,10 +3,10 @@ package history
 import (
 	"context"
 	"encoding/json"
+	"github.com/mazitovt/logger"
 	v1 "mtsbank/history/internal/api/http/v1"
 	gs "mtsbank/history/internal/client/generator_service"
 	"mtsbank/history/internal/repo"
-	"mtsbank/history/logger"
 	"net/http"
 	"time"
 )
