@@ -18,6 +18,9 @@ var (
 )
 
 type Config struct {
+	LogLevel      string        `envconfig:"LOG_LEVEL"`
+	Host          string        `envconfig:"HOST"`
+	Port          string        `envconfig:"PORT"`
 	CurrencyPairs []string      `envconfig:"CURRENCY_PAIRS"`
 	Pattern       string        `envconfig:"PATTERN"`
 	Seed          int64         `envconfig:"SEED"`

@@ -3,8 +3,8 @@ package cache
 import "sync"
 
 type Cache[T any] interface {
-	Add(v T)
-	Values() []T
+	Put(v T)
+	Fill([]T) []T
 }
 
 var _ Cache[any] = (*LimitedCache[any])(nil)
@@ -15,14 +15,14 @@ type LimitedCache[T any] struct {
 	s     []T
 }
 
-func NewLimitedCache[T any](size uint64) *LimitedCache[T] {
+func NewLimitedCache[T any](limit uint64) *LimitedCache[T] {
 	return &LimitedCache[T]{
 		index: 0,
-		s:     make([]T, 0, size),
+		s:     make([]T, 0, limit),
 	}
 }
 
-func (l *LimitedCache[T]) Add(v T) {
+func (l *LimitedCache[T]) Put(v T) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	_ = append(l.s[:l.index], v)
@@ -35,13 +35,17 @@ func (l *LimitedCache[T]) Add(v T) {
 	}
 }
 
-func (l *LimitedCache[T]) Values() []T {
+func (l *LimitedCache[T]) Fill(out []T) []T {
 	l.mu.RLock()
 	defer l.mu.RUnlock()
 
-	r := make([]T, len(l.s))
-	copy(r[:len(r)-l.index], l.s[l.index:])
-	copy(r[len(r)-l.index:], l.s[:l.index])
+	if cap(out) < len(l.s) {
+		return out
+	}
 
-	return r
+	out = out[:len(l.s)]
+	copy(out[:len(out)-l.index], l.s[l.index:])
+	copy(out[len(out)-l.index:], l.s[:l.index])
+
+	return out
 }

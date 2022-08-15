@@ -1,7 +1,8 @@
 package internal
 
 import (
-	"fmt"
+	"context"
+	"github.com/mazitovt/logger"
 	"testing"
 	"time"
 )
@@ -10,25 +11,15 @@ func TestPriceGenerator(t *testing.T) {
 
 	pairs := []string{"EURUSD", "USDRUB", "USDJPY"}
 	period := 1000 * time.Millisecond
-	g := NewSimplePriceGenerator(pairs, ExchangeRateFromTime, 3)
-	go func() {
-		for {
-			g.Generate()
-			time.Sleep(period)
-		}
-	}()
+	g := NewSimplePriceGenerator(pairs, ExchangeRateFromTime, 3, logger.New(logger.Info))
 
-	time.Sleep(period / 2)
+	ctx, cancel := context.WithCancel(context.Background())
 
-	for i := 0; i < 10; i++ {
-		v, _ := g.Get(pairs[0])
-		fmt.Println(v)
-		v, _ = g.Get(pairs[1])
-		fmt.Println(v)
-		v, _ = g.Get(pairs[2])
-		fmt.Println(v)
-		_ = v
-		time.Sleep(period)
-	}
+	go g.Start(ctx, period)
+
+	time.Sleep(3 * time.Second)
+	cancel()
+
+	time.Sleep(3 * time.Second)
 
 }

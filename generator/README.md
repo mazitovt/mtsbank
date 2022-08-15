@@ -10,3 +10,5 @@
 TODO:
 - [x] Convert Cache interface to generic
 - [x] Make SimpleCache thread-safe
+- [x] Use sync.Pool for response encoding
+- [ ] Health checks: liveness, readiness, startup

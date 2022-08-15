@@ -2,62 +2,89 @@ package main
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"generator/internal"
+	"generator/internal/api/http/v1"
 	"generator/internal/config"
+	middleware "github.com/deepmap/oapi-codegen/pkg/chi-middleware"
+	"github.com/go-chi/chi/v5"
 	"github.com/mazitovt/logger"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 )
+
+const defaultLogLevel = logger.Info
 
 func main() {
 
+	// configure service
 	cfg, err := config.Init()
 	checkErr(err)
+
+	var l logger.Logger
+	if level, err := logger.LevelFromString(cfg.LogLevel); err != nil {
+		l = logger.New(defaultLogLevel)
+		l.Warn("unknown log level. set log level to default")
+	} else {
+		l = logger.New(level)
+	}
 
 	f, err := config.GetGeneratorFunc(cfg)
 	checkErr(err)
 
-	g := internal.NewSimplePriceGenerator(cfg.CurrencyPairs, f, uint64(cfg.CacheSize), logger.New(logger.Debug))
+	g := internal.NewSimplePriceGenerator(cfg.CurrencyPairs, f, uint64(cfg.CacheSize), l)
 
-	ctx, cancel := context.WithCancel(context.Background())
-
-	// gracefully shutdown when signal comes
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, syscall.SIGINT, syscall.SIGTERM)
-	go func() {
-		<-sigs
-		fmt.Println("cancel signal")
-		cancel()
-	}()
-
-	// periodically call Generate
-	go startGenerate(ctx, g, cfg.Period)
-
-	// wait for incoming requests
-	http.HandleFunc("/rates", newHandler(g))
-	s := http.Server{
-		Addr:    ":8080",
-		Handler: http.DefaultServeMux,
+	// configure router
+	swagger, err := v1.GetSwagger()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error loading swagger spec\n: %s", err)
+		os.Exit(1)
 	}
 
+	swagger.Servers = nil
+
+	r := chi.NewRouter()
+	r.Use(middleware.OapiRequestValidator(swagger))
+	v1.HandlerFromMux(g, r)
+
+	s := &http.Server{
+		Handler: r,
+		Addr:    net.JoinHostPort(cfg.Host, cfg.Port),
+	}
+
+	// shutdown gracefully
+	ctx, cancel := context.WithCancel(context.Background())
+
+	idleConnsClosed := make(chan struct{})
+
+	exit := make(chan os.Signal, 1)
+
+	signal.Notify(exit, os.Interrupt, syscall.SIGTERM)
 	go func() {
-		<-ctx.Done()
-		fmt.Println("server shutdown")
+		<-exit
+		cancel()
 		if err := s.Shutdown(context.Background()); err != nil {
-			// Error from closing listeners, or context timeout:
 			log.Printf("HTTP server Shutdown: %v", err)
 		}
+		close(idleConnsClosed)
 	}()
 
-	err = s.ListenAndServe()
-	time.Sleep(cfg.Period)
-	log.Fatal(err)
+	// Start service
+	go g.Start(ctx, cfg.Period)
+	l.Info("Service started")
+
+	// Start server
+	if err = s.ListenAndServe(); err != http.ErrServerClosed {
+		checkErr(err)
+	}
+
+	<-idleConnsClosed
+
+	l.Info("Service stopped")
 }
 
 func checkErr(err error) {
@@ -65,46 +92,3 @@ func checkErr(err error) {
 		log.Fatal(err)
 	}
 }
-
-func startGenerate(ctx context.Context, g internal.PriceGenerator, period time.Duration) {
-	for {
-		select {
-		case <-ctx.Done():
-			fmt.Println("stop generating")
-			return
-		default:
-			g.Generate()
-			time.Sleep(period)
-		}
-	}
-}
-
-func newHandler(g internal.PriceGenerator) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-
-		if !r.URL.Query().Has("currency_pair") {
-			w.Write([]byte("parameter 'currency_pair' is missing"))
-			return
-		}
-
-		pair := r.URL.Query().Get("currency_pair")
-
-		get, err := g.Get(pair)
-		if err != nil {
-			w.Write([]byte(err.Error()))
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		err = json.NewEncoder(w).Encode(get)
-		if err != nil {
-			w.Write([]byte(err.Error()))
-			return
-		}
-	}
-}
-
-//if err := srv.ListenAndServe(); err != http.ErrServerClosed {
-//// Error starting or closing listener:
-//log.Fatalf("HTTP server ListenAndServe: %v", err)
-//}

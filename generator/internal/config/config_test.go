@@ -18,12 +18,18 @@ func TestConfig_Init(t *testing.T) {
 		{
 			name: "config with time",
 			inputEnv: map[string]string{
+				"RATE_GENERATOR_LOG_LEVEL":      "info",
+				"RATE_GENERATOR_HOST":           "localhost",
+				"RATE_GENERATOR_PORT":           "8080",
 				"RATE_GENERATOR_CURRENCY_PAIRS": "EURUSD,USDRUB,USDJPY",
 				"RATE_GENERATOR_PATTERN":        "TIME",
 				"RATE_GENERATOR_PERIOD":         "1s",
 				"RATE_GENERATOR_CACHE_SIZE":     "5",
 			},
 			er: Config{
+				LogLevel:      "info",
+				Host:          "localhost",
+				Port:          "8080",
 				CurrencyPairs: []string{"EURUSD", "USDRUB", "USDJPY"},
 				Pattern:       "TIME",
 				Period:        1 * time.Second,
