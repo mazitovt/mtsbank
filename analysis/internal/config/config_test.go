@@ -18,7 +18,10 @@ func TestConfig_Init(t *testing.T) {
 		{
 			name: "valid config",
 			inputEnv: map[string]string{
-				"RATE_ANALYZER_HTTP_HOST":      "localhost",
+				"RATE_ANALYZER_LOG_LEVEL":      "debug",
+				"RATE_ANALYZER_BATCH_PERIOD":   "5s",
+				"RATE_ANALYZER_BATCH_SIZE":     "50",
+				"RATE_ANALYZER_HTTP_HOST":      "0.0.0.0",
 				"RATE_ANALYZER_HTTP_PORT":      "8082",
 				"RATE_ANALYZER_CURRENCY_PAIRS": "EURUSD,USDRUB,USDJPY",
 				"RATE_ANALYZER_TIME_FRAMES":    "1m,5m,15m,30m,1h",
@@ -30,8 +33,13 @@ func TestConfig_Init(t *testing.T) {
 				"RATE_ANALYZER_GENERATOR_PORT": "8080",
 			},
 			er: Config{
+				Batch: Batch{
+					Period: 5 * time.Second,
+					Size:   50,
+				},
+				LogLevel: "debug",
 				Http: Http{
-					Host: "localhost",
+					Host: "0.0.0.0",
 					Port: "8082",
 				},
 				CurrencyPairs: []string{"EURUSD", "USDRUB", "USDJPY"},

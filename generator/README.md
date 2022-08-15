@@ -6,6 +6,7 @@
 * `TIME` - использовать текущее время
 * `SEED` - использовать значение `RATE_GENERATOR_SEED`
 
+Уровни логирования: `debug`, `info`, `warn`, `error`
 
 TODO:
 - [x] Convert Cache interface to generic

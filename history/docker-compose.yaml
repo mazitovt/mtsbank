@@ -1,6 +1,27 @@
 version: "3.9"
 
+networks:
+  service-network-1:
+    name: ${SERVICE_NETWORK}
+    external: true
+
 services:
+  history:
+    image: history-service
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./.bin/:/root/
+    env_file:
+      - .env
+    ports:
+      - "8082:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - service-network-1
 
   postgres:
     image: postgres:14.3-alpine3.16
@@ -10,15 +31,15 @@ services:
       POSTGRES_DB: "history"
       POSTGRES_USER: "history"
       POSTGRES_PASSWORD: "history"
-    #      PGDATA: "/var/lib/postgresql/data/pgdata"
-    #    volumes:
-    #      - ./volumes/postgres:/var/lib/postgresql/data
+#      PGDATA: "/var/lib/postgresql/data/pgdata"
+#    volumes:
+#      - ./volumes/postgres:/var/lib/postgresql/data
     ports:
       - "5432:5432"
-#    networks:
-#      - app-net-1
     healthcheck:
       test: [ "CMD-SHELL", "pg_isready -U postgres" ]
       interval: 5s
       timeout: 5s
       retries: 5
+    networks:
+      - service-network-1

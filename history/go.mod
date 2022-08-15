@@ -12,6 +12,7 @@ require (
 	github.com/mazitovt/logger v0.0.0-20220815101159-9e824ce57892
 	github.com/stretchr/testify v1.8.0
 	github.com/testcontainers/testcontainers-go v0.13.0
+	golang.org/x/sync v0.0.0-20210220032951-036812b2e83c
 	gotest.tools/v3 v3.3.0
 )
 

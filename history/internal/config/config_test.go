@@ -18,10 +18,11 @@ func TestConfig_Init(t *testing.T) {
 		{
 			name: "valid config",
 			inputEnv: map[string]string{
-				"RATE_HISTORY_HOST":    "127.0.0.1",
-				"RATE_HISTORY_PORT":    "8081",
-				"RATE_HISTORY_MIGRATE": "true",
-				"RATE_HISTORY_PERIOD":  "5s",
+				"RATE_HISTORY_LOG_LEVEL": "info",
+				"RATE_HISTORY_HOST":      "127.0.0.1",
+				"RATE_HISTORY_PORT":      "8080",
+				"RATE_HISTORY_MIGRATE":   "true",
+				"RATE_HISTORY_PERIOD":    "5s",
 
 				"RATE_HISTORY_GENERATOR_HOST": "generator",
 				"RATE_HISTORY_GENERATOR_PORT": "8080",
@@ -34,10 +35,11 @@ func TestConfig_Init(t *testing.T) {
 				"RATE_HISTORY_POSTGRES_DBNAME":   "history",
 			},
 			er: Config{
-				Host:    "127.0.0.1",
-				Port:    "8080",
-				Migrate: true,
-				Period:  5 * time.Second,
+				LogLevel: "info",
+				Host:     "127.0.0.1",
+				Port:     "8080",
+				Migrate:  true,
+				Period:   5 * time.Second,
 				Generator: Generator{
 					Host: "generator",
 					Port: "8080",

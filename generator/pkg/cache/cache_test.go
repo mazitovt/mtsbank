@@ -53,3 +53,14 @@ func TestLimitedCache2(t *testing.T) {
 	out = c.Fill(out)
 	require.ElementsMatch(t, out, []int{1, 2})
 }
+
+func TestLimitedCache_Fill_DecreaseSliceLen(t *testing.T) {
+
+	c := NewLimitedCache[int](5)
+	out := make([]int, 4)
+	c.Put(1)
+	c.Put(2)
+	c.Put(3)
+	out = c.Fill(out)
+	require.ElementsMatch(t, out, []int{1, 2, 3})
+}

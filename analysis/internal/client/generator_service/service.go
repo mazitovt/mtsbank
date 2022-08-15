@@ -1,70 +1,50 @@
-package generator_service
+package v1
 
 import (
 	"context"
-	"encoding/json"
-	"github.com/mazitovt/logger"
-	"net/http"
-	"net/url"
+	"errors"
+	api "mtsbank/analysis/internal/model"
+)
+
+var _ GeneratorService = (*ClientWithResponses)(nil)
+
+var (
+	ErrNoDecodedValues = errors.New("no decoded values")
+	ErrBufferGrow      = errors.New("buffer had been grown")
 )
 
 type GeneratorService interface {
-	Values(ctx context.Context, currencyPair string) ([]ExchangeRateDTO, error)
+	GetRates(ctx context.Context, currencyPair string, out []api.ExchangeRate) ([]api.ExchangeRate, error)
 }
 
-type client struct {
-	url    string
-	logger logger.Logger
-}
-
-func NewService(hostPort string, logger logger.Logger) GeneratorService {
-	url := url.URL{
-		Scheme: "http",
-		Host:   hostPort,
-		Path:   "rates",
-	}
-	return &client{
-		url:    url.String(),
-		logger: logger,
-	}
-}
-
-func (c *client) Values(ctx context.Context, currencyPair string) ([]ExchangeRateDTO, error) {
-	c.logger.Debug("client.Values(): %v", currencyPair)
-	req, err := http.NewRequest("GET", c.url, nil)
+// GetRates grows out slice and copies new rates to out slice.
+//
+// Makes a blocking http call
+func (c *ClientWithResponses) GetRates(ctx context.Context, currencyPair string, buffer []api.ExchangeRate) ([]api.ExchangeRate, error) {
+	resp, err := c.GetRatesCurrencyPairWithResponse(ctx, currencyPair)
 	if err != nil {
-		c.logger.Error("http.NewRequest: ", err)
-		return nil, err
+		return buffer, err
 	}
 
-	q := req.URL.Query()
-	q.Add("currency_pair", currencyPair)
-	req.URL.RawQuery = q.Encode()
-
-	select {
-	case <-ctx.Done():
-		c.logger.Error("Context.Done: ", ctx.Err())
-		return nil, ctx.Err()
-	default:
+	if resp.JSON200 == nil {
+		return buffer, ErrNoDecodedValues
 	}
 
-	c.logger.Debug(req.URL.String())
-	resp, err := http.DefaultClient.Do(req)
-	if err != nil {
-		c.logger.Error("Client.Do: ", err)
-		return nil, err
+	err = nil
+
+	if len(*resp.JSON200) > cap(buffer) {
+		buffer = make([]api.ExchangeRate, 0, len(*resp.JSON200))
+		err = ErrBufferGrow
 	}
 
-	defer resp.Body.Close()
+	buffer = buffer[:len(*resp.JSON200)]
 
-	dto := []ExchangeRateDTO{}
-
-	if err = json.NewDecoder(resp.Body).Decode(&dto); err != nil {
-		c.logger.Error("Decoder.Decode: ", err)
-		return nil, err
+	for i := range buffer {
+		buffer[i] = api.ExchangeRate{
+			Rate: (*resp.JSON200)[i].Rate,
+			Time: (*resp.JSON200)[i].Time,
+		}
 	}
 
-	c.logger.Debug("%v", dto)
-
-	return dto, nil
+	return buffer, err
 }
