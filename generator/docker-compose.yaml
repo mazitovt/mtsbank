@@ -1,0 +1,21 @@
+version: "3.9"
+
+networks:
+  service-network-1:
+    name: ${SERVICE_NETWORK}
+    external: true
+
+services:
+  generator:
+    image: generator-service
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./.bin/:/root/
+    env_file:
+      - .env
+    ports:
+      - "8081:8080"
+    networks:
+    - service-network-1
